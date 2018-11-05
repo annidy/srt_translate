@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding: UTF-8
 #
 # this program is designed to translate to chinese only.
@@ -7,16 +7,18 @@ import sys
 import re
 import threading
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 import json
 from textwrap import wrap
 try:
     import urllib2 as request
-    from urllib import quote
+    from urllib import quote_plus
+    from urllib2 import HTTPError
 except:
     from urllib import request
-    from urllib.parse import quote
+    from urllib.parse import quote_plus
+    from urllib import HTTPError
 
 
 class Translator:
@@ -48,6 +50,7 @@ class Translator:
         json5 = self._get_json5_from_google(source)
         data = json.loads(json5)
         translation = data['responseData']['translatedText']
+        print(translation)
         if not isinstance(translation, bool):
             return translation
         else:
@@ -59,7 +62,7 @@ class Translator:
             return next_best_match
 
     def _get_json5_from_google(self, source):
-        escaped_source = quote(source, '')
+        escaped_source = quote_plus(source.encode('utf8'))
         headers = {'User-Agent':
                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_8) AppleWebKit/535.19\
                    (KHTML, like Gecko) Chrome/18.0.1025.168 Safari/535.19'}
@@ -73,7 +76,7 @@ class Translator:
         r = request.urlopen(req)
         return r.read().decode('utf-8')
 
-trans = Translator('zh')
+trans = Translator('zh', from_lang="ko")
 
 if len(sys.argv) < 2:
     if sys.version_info < (3, 0):
@@ -98,10 +101,9 @@ for fname in fnames:
         line = ifile.readline()
         if not line:
             break
-        try:
-            line = line.replace(b'\xef\xbb\xbf', b'').decode('cp1252')
-        except:
-            line = line.replace(b'\xef\xbb\xbf', b'').decode('UTF-8')
+
+        line = line.replace(b'\xef\xbb\xbf', b'').decode('UTF-8')
+
         if not line.strip():
             output.append('\r\n')
         elif line.strip().isdigit():
@@ -110,12 +112,10 @@ for fname in fnames:
             output.append(line)
         else:
             script = re.sub(r'<[^<]+>', '', line.strip())
+            logging.info(script)
             append = ''
             while not script.endswith(('.', '?', ')', '=', ':')):
-                try:
-                    line = ifile.readline().decode('cp1252')
-                except:
-                    line = ifile.readline().decode('UTF-8')
+                line = ifile.readline().decode('UTF-8')
                 if not line:
                     break
                 if not line.strip():
@@ -135,13 +135,19 @@ for fname in fnames:
 
     result = [''] * len(job)
 
-    n_of_t = 10
+    n_of_t = 10  # 并行线程
     semaphor = threading.Semaphore(n_of_t)
 
     def do_translate(job, result, index, semaphor):
         logging.info('translating %s - %s' % (index, index + n))
-        result[index:index+n] = trans.translate('\r\n'.join(job[index:index+n])).splitlines()
-        semaphor.release()
+        try:
+            result[index:index+n] = trans.translate('\r\n'.join(job[index:index+n])).splitlines()
+        except HTTPError,e:
+            logging.error(e)
+        finally:
+            semaphor.release()
+            pass
+        
 
     n = 10
     i = 0
@@ -162,8 +168,10 @@ for fname in fnames:
 
     for item in output:
         if item == 1:
-            ofile.write(next(result_iter).encode('UTF-8'))
-            ofile.write(b'\r\n')
+            tr = next(result_iter).encode('UTF-8')
+            if tr != '':
+                ofile.write()
+                ofile.write(b'\r\n')
             ofile.write(next(job_iter).encode('UTF-8'))
         else:
             ofile.write(item.encode('UTF-8'))
